@@ -36,7 +36,7 @@ There are also a couple of functions that may be helpful in working with the `ml
 
 ```{r}
 here("code",
-     "mlogit_helpers.R") |>
+     "mlogit_helpers_new.R") |>
   source()
 ```
 
@@ -55,6 +55,11 @@ hh_data <- here("data",
                 "NHTS",
                 "hhpub.csv") |>
   read_csv(show_col_types = FALSE)
+glimpse(hh_data)
+hh_data |> 
+  count(HOUSEID) |> 
+  filter(n > 1)
+
 ```
 
 The NHTS also includes person-level, trip-level, and vehicle-level datasets. You could use these to construct household-level variables if you want to, but they aren't included in the GitHub repository because the files are larger than 50 MB. To use those files, go to <https://nhts.ornl.gov/assets/2016/download/csv.zip>, extract the downloaded files, and save the four csv files (hhpub, perpub, trippub, and vehpub) to the "data" subfolder within the "examples" folder.
@@ -66,6 +71,7 @@ person_data <- here("data",
                     "NHTS",
                     "perpub.csv") |>
   read_csv(show_col_types = FALSE)
+glimpse(person_data)
 ```
 
 ## Choose variables
@@ -216,14 +222,21 @@ We will need to use the following variables from the person file:
 
 -   WORKER: Whether the person is a worker.
 
+    -   QUESTION: Binary is between 1 and 2. 1 is YES. 2 is NO.
+
 -   DRIVER: Whether the person is a driver.
+
+    -   QUESTION: Binary is between 1 and 2. 1 is YES. 2 is NO.
+
+-   HOME OWN IS 1 and RENT IS 2
 
 ```{r}
 person_data <- person_data |>
   select(HOUSEID,
          R_AGE,
          WORKER,
-         DRIVER)
+         DRIVER,
+         HOMEOWN)
 ```
 
 ### Outcome: Vehicle availability
@@ -307,6 +320,8 @@ hh_data <- hh_data |>
 
 Is there anyone in the household who is a driver, but not a worker?
 
+QUESTION: Is this basically unemployed, seniors, and kids who can drive?
+
 ```{r}
 non_work_driver <- person_data |>
   mutate(non_work_driver = WORKER == "02" & DRIVER == "01") |>
@@ -329,6 +344,29 @@ hh_data <- hh_data |>
                              TRUE ~ "Medium"))
 ```
 
+### My Predictor: Home Own Or Rent
+
+Home Own is 1 and Rent is 2
+
+```{r}
+glimpse(hh_data)
+person_summary <- person_data |> 
+  group_by(HOUSEID) |> 
+  summarize(HOMEOWN = first(HOMEOWN), .groups = "drop")  # Or use mode()
+
+hh_data <- hh_data |> 
+  left_join(person_summary, by = "HOUSEID")
+
+hh_data <- hh_data |> 
+  mutate(HOMEOWN = case_when(
+    HOMEOWN == "01" ~ "Own",
+    HOMEOWN == "02" ~ "Rent",
+    TRUE ~ HOMEOWN  # Keeps any other values unchanged
+  ))
+
+  
+```
+
 ## Prepare data
 
 ### Drop the variables you won't be using
@@ -346,7 +384,8 @@ hh_data <- hh_data |>
          three_drivers,
          non_work_driver,
          income,
-         density)
+         density,
+         HOMEOWN)
 
 ```
 
@@ -357,7 +396,7 @@ We will train the model on half of our sample and use the other half to test our
 I'm setting a random number seed so that my randomly-selected variable will be the same every time. You can choose any number as your seed (I'm using my childhood phone number! It was a land line!). In your own work, you should use a different seed than I'm using here.
 
 ```{r}
-set.seed(3775668)
+set.seed(6797887)
 
 hh_data_train_ids <- sample(hh_data$HOUSEID, 
                         size = ceiling(nrow(hh_data)/2))
@@ -396,6 +435,7 @@ model_veh <- mlogit(choice ~ 0 |
                       three_drivers + 
                       non_work_driver +
                       income +
+                      HOMEOWN +
                       density | 0,
                            veh_dfidx_train,
                            reflevel = "Suff.")
@@ -410,6 +450,14 @@ summary(model_veh)
 ## Interpreting model results
 
 The regression coefficients predict the *utility* of an alternative. The utility of an alternative relative to that of the other alternatives determines the probability of choosing that alternative. Looking the regression coefficient for the number of children is 0.2 for insufficient vehicles, and -0.12 for zero vehicles. This means that each additional child in a household increases the utility of having insufficient vehicles (relative to having sufficient vehicles) and decreases the utility of having zero vehicles (relative to having sufficient vehicles).
+
+*Question:*
+
+Is the way to read then the n_child compared to the n_seniors - is having one more child in a household vs having one more senior the vehicle insufficiency is higher
+
+*Question:*
+
+What does -8.37 utility mean in comparison to 0.24. Is the range 0-100?
 
 ### Predicting probabilities
 
