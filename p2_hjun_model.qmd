@@ -39,7 +39,7 @@ hh_data <- here("data",
                 "NHTS",
                 "hhpub.csv") |>
   read_csv(show_col_types = FALSE)
-glimpse(hh_data)
+
 hh_data |> 
   count(HOUSEID) |> 
   filter(n > 1)
@@ -48,7 +48,6 @@ person_data <- here("data",
                     "NHTS",
                     "perpub.csv") |>
   read_csv(show_col_types = FALSE)
-glimpse(person_data)
 
 hh_data <- hh_data |>
   select(WRKCOUNT,
@@ -59,11 +58,10 @@ hh_data <- hh_data |>
          HHFAMINC,
          HBPPOPDN,
          HOUSEID,
-         PRICE,
          HTHTNRNT,
-         PC,
-         RAIL,
-         TAXI)
+         HOMEOWN,
+         URBRUR)
+
 
 person_data <- person_data |>
   select(HOUSEID,
@@ -125,38 +123,29 @@ hh_data <- hh_data |>
                              TRUE ~ "Medium"))
 
 
-hh_data <- hh_data |> 
-  filter(HTHTNRNT != "-9")
+hh_data <- hh_data %>%
+  mutate(HTHTNRNT= case_when(
+    HTHTNRNT %in% c("0", "05", "20", "30", "40") ~ "minority_rent",
+    HTHTNRNT %in% c("50", "60", "70", "80", "90", "95") ~ "majority_rent",
+    TRUE ~ NA_character_  # Assign NA for any values not listed
+  ))
 
-hh_data <- hh_data |> 
-  filter(PC != "-9, -7, -8")
+hh_data <- hh_data |>
+  filter(!HOMEOWN %in% c(-7, -8, 97)) |>  # Remove unwanted values
+  mutate(HOMEOWN = case_when(
+    HOMEOWN == "01" ~ "OWN",
+    HOMEOWN == "02" ~ "RENT",
+    TRUE ~ as.character(HOMEOWN)  # Keep other values unchanged
+  )) |>
+  rename(homeownership = HOMEOWN)  # Rename column
 
-hh_data <- hh_data |> 
-  filter(PC %in% c("01", "02", "03", "04", "05")) |> 
-  mutate(PC = recode(PC, 
-                       "01" = "daily", 
-                       "02" = "weekly", 
-                       "03" = "monthly", 
-                       "04" = "yearly", 
-                       "05" = "never"))
-
-hh_data <- hh_data |> 
-  filter(RAIL %in% c("01", "02")) |> 
-  mutate(PC = recode(PC, 
-                       "01" = "RAIL", 
-                       "02" = "NORAIL"))
-
-hh_data <- hh_data |> 
-  filter(TAXI %in% c("01", "02", "03", "04", "05"))
-
-hh_data <- hh_data |> 
-  filter(TAXI %in% c("01", "02", "03", "04", "05")) |> 
-  mutate(TAXI = recode(TAXI, 
-                       "01" = "daily", 
-                       "02" = "weekly", 
-                       "03" = "monthly", 
-                       "04" = "yearly", 
-                       "05" = "never"))
+hh_data <- hh_data |>
+  filter(!URBRUR %in% c(-7, -8, 97)) |>  # Remove unwanted values
+  mutate(URBRUR = case_when(
+    URBRUR == "01" ~ "URBAN",
+    URBRUR == "02" ~ "RURAL",
+    TRUE ~ as.character(URBRUR)  # Keep other values unchanged
+  ))
 
 hh_data <- hh_data |>
   select(HOUSEID,
@@ -170,83 +159,12 @@ hh_data <- hh_data |>
          income,
          density,
          HTHTNRNT,
-         RAIL,
-         PC,
-         TAXI)
-
-
+         homeownership,
+         URBRUR)
 
 ```
 
-### Debugging my two index issue
-
-```{r}
-hh_data %>%
-  group_by(HOUSEID) %>%
-  summarise(unique_veh_avail = n_distinct(veh_avail)) %>%
-  filter(unique_veh_avail > 1)
-
-hh_data %>%
-  group_by(HOUSEID) %>%
-  filter(n_distinct(veh_avail) > 1) %>%
-  arrange(HOUSEID)
-
-hh_data %>%
-  group_by(HOUSEID) %>%
-  summarise(veh_avail_values = paste(unique(veh_avail), collapse = ", ")) %>%
-  filter(str_detect(veh_avail_values, ","))  # Filters for HOUSEIDs with multiple values
-
-hh_data <- hh_data %>%
-  distinct(HOUSEID, .keep_all = TRUE)
-
-str(hh_data_train)
-
-any(is.na(hh_data_train$HOUSEID)) # Should return FALSE
-any(is.na(hh_data_train$veh_avail)) # Should return FALSE
-
-sample_data <- hh_data_train %>% slice(1:10)  # Take a small subset
-dfidx::dfidx(sample_data, drop.index = FALSE)
-
-hh_data_train <- hh_data_train %>%
-  distinct(HOUSEID, .keep_all = TRUE)
-
-hh_data_test <- hh_data_test %>%
-  distinct(HOUSEID, .keep_all = TRUE)
-
-veh_dfidx_train <- fn_make_dfidx(hh_data_train, "HOUSEID", "veh_avail")
-
-library(dfidx)
-
-veh_dfidx_train <- dfidx(hh_data_train, idx = c("HOUSEID"), drop.index = FALSE)
-
-hh_data_train %>%
-  group_by(HOUSEID, veh_avail) %>%
-  summarise(count = n(), .groups = "drop") %>%
-  filter(count > 1)
-
-get_mode <- function(x) {
-  ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
-}
-
-hh_data_train <- hh_data_train %>%
-  group_by(HOUSEID) %>%
-  summarise(veh_avail = get_mode(veh_avail), .groups = "drop")
-
-hh_data_test <- hh_data_test %>%
-  group_by(HOUSEID) %>%
-  summarise(veh_avail = get_mode(veh_avail), .groups = "drop")
-
-hh_data_train %>%
-  group_by(HOUSEID, veh_avail) %>%
-  summarise(count = n(), .groups = "drop") %>%
-  filter(count > 1)
-
-hh_data <- hh_data %>%
-  group_by(HOUSEID) %>%
-  summarise(veh_avail = first(veh_avail), .groups = "drop")
-
-
+```{}
 ```
 
 ### Creating and testing data set
@@ -281,9 +199,8 @@ model_veh <- mlogit(choice ~ 0 |
                       non_work_driver +
                       income +
                       HTHTNRNT +
-                      RAIL+
-                      PC+
-                      TAXI+
+                      homeownership+
+                      URBRUR+
                       density | 0,
                            veh_dfidx_train,
                            reflevel = "Suff.")
@@ -298,6 +215,7 @@ predicts_test <- predict(model_veh, veh_dfidx_test) |>
 
 head(predicts_test) |>
   kable()
+
 ```
 
 The `echo: false` option disables the printing of code (only output is displayed).
@@ -317,5 +235,34 @@ predicts_test <- predicts_test |>
   mutate(correct = veh_avail == most_likely)
 confusionMatrix(data = predicts_test$most_likely,
                 reference = predicts_test$veh_avail)
+
+model <- mlogit(choice ~ 0 | 
+                      WRKCOUNT +
+                      n_child +
+                      n_seniors +
+                      n_extra_drivers +
+                      three_drivers + 
+                      non_work_driver +
+                      income +
+                      HTHTNRNT +
+                      homeownership+
+                      URBRUR+
+                      density | 0,
+                           veh_dfidx_train,
+                           reflevel = "Suff.")
+AIC(model)
+
+model_carole <- mlogit(choice ~ 0 | 
+                      WRKCOUNT +
+                      n_child +
+                      n_seniors +
+                      n_extra_drivers +
+                      three_drivers + 
+                      non_work_driver +
+                      income +
+                      density | 0,
+                           veh_dfidx_train,
+                           reflevel = "Suff.")
+AIC(model_carole)
 
 ```
